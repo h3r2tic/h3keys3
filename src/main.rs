@@ -7,7 +7,7 @@ use winapi::shared::windef::{HWND, HBRUSH, HICON, HCURSOR, HMENU, POINT, RECT};
 use winapi::shared::ntdef::{LPCSTR};
 use winapi::um::winuser;
 use kernel32::{GetModuleHandleA};
-use std::{thread, ptr, time, f32};
+use std::{thread, ptr, time, f32, mem, str};
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 
@@ -128,7 +128,32 @@ fn remap_colemak(vk: u8) -> i32
 }
 
 fn get_window_under_cursor(cursor_pos: (i32, i32)) -> HWND {
-	unsafe { winuser::WindowFromPoint( POINT { x: cursor_pos.0, y: cursor_pos.1 } ) }
+	unsafe {
+		let w = winuser::WindowFromPoint( POINT { x: cursor_pos.0, y: cursor_pos.1 } );
+		let w = winuser::GetAncestor(w, 2 /* GA_ROOT */);
+
+		let win_name = [0u8; 256];
+		winuser::GetWindowTextA(w, mem::transmute(&win_name), 256);
+
+		let nul_pos = win_name.iter().position(|&x| x == 0u8);
+		let nul_pos = match nul_pos {
+			Some(pos) => pos,
+			None => return ptr::null_mut(),
+		};
+
+		let win_name = str::from_utf8(&win_name[..nul_pos]);
+		let win_name = match win_name {
+			// Let's not move the Desktop...
+			Ok("Program Manager") => return ptr::null_mut(),
+			Ok(name) => name,
+			Err(_) => return ptr::null_mut(),
+		};
+
+		println!("win name: {}", win_name);
+		println!("hwnd: {:x}", w as usize);
+		println!("desktop: {:x}", winuser::GetDesktopWindow() as usize);
+		w
+	}
 }
 
 fn get_window_rect(hwnd: HWND) -> RECT {
