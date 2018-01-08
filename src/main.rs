@@ -2,14 +2,21 @@
 #![feature(nll)]
 extern crate winapi;
 extern crate kernel32;
+extern crate winrt;
 use winapi::shared::minwindef::*;
 use winapi::shared::windef::{HWND, HBRUSH, HICON, HCURSOR, HMENU, POINT, RECT};
 use winapi::shared::ntdef::{LPCSTR};
 use winapi::um::winuser;
 use kernel32::{GetModuleHandleA};
+
+use winrt::*;
+use winrt::windows::data::xml::dom::*;
+use winrt::windows::ui::notifications::*;
+
 use std::{thread, ptr, time, f32, mem, str};
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
+use std::cell::RefCell;
 
 const ESCAPE : char = winuser::VK_ESCAPE as u8 as char;
 const SEMICOLON : char = winuser::VK_OEM_1 as u8 as char;
@@ -142,16 +149,14 @@ fn get_window_under_cursor(cursor_pos: (i32, i32)) -> HWND {
 		};
 
 		let win_name = str::from_utf8(&win_name[..nul_pos]);
-		let win_name = match win_name {
+
+		match win_name {
 			// Let's not move the Desktop...
 			Ok("Program Manager") => return ptr::null_mut(),
 			Ok(name) => name,
 			Err(_) => return ptr::null_mut(),
 		};
 
-		println!("win name: {}", win_name);
-		println!("hwnd: {:x}", w as usize);
-		println!("desktop: {:x}", winuser::GetDesktopWindow() as usize);
 		w
 	}
 }
@@ -171,10 +176,13 @@ struct ScrollEmuState
 
 struct InputHookState
 {
+	colemak_on: bool,
+
 	mod1_on: bool,
 	mod2_on: bool,
 	ctrlmod_on: bool,
 	winkey_on: bool,
+	admin_on: bool,
 
 	leftalt_on: bool,
 	leftctrl_on: bool,
@@ -196,10 +204,13 @@ impl InputHookState
 {
 	fn new() -> InputHookState {
 		InputHookState {
+			colemak_on: true,
+
 			mod1_on: false,
 			mod2_on: false,
 			ctrlmod_on: false,
 			winkey_on: false,
+			admin_on: false,	// global option control mode, colemak enable/disable, etc.
 
 			leftalt_on: false,
 			leftctrl_on: false,
@@ -246,6 +257,7 @@ impl InputHookState
 						self.ctrlmod_on = false;
 						self.window_move_hwnd = ptr::null_mut();
 						self.window_resize_hwnd = ptr::null_mut();
+						self.admin_on = false;
 
 						let scroll = &mut self.scroll_emu_state.lock().unwrap();
 						scroll.scroll_emu_on = false;
@@ -262,7 +274,11 @@ impl InputHookState
 				}
 
 				// Colemak
-				let remap = key(remap_colemak(input_key.vkCode as u8));
+				let remap = if self.colemak_on {
+					key(remap_colemak(input_key.vkCode as u8))
+				} else {
+					key(0)
+				};
 
 				// Windows keys
 				let remap = match input_key.vkCode as u8 as char {
@@ -320,12 +336,27 @@ impl InputHookState
 					_ => remap,
 				};
 
-				// Caps-lock layer
 				let remap = if self.mod1_on {
+					// Caps-lock layer
+
 					let mapped_key = match input_key.vkCode as u8 as char
 					{
-						ESCAPE => std::process::exit(0),
-						' ' => key(winuser::VK_SPACE),
+						ESCAPE => {
+							self.admin_on = key_pressed;
+							RemapTarget::Block
+						},
+						' ' => {
+							if self.admin_on {
+								if key_released {
+									toast_notification("Program terminated");
+									std::process::exit(0);
+								} else {
+									RemapTarget::Block
+								}
+							} else {
+								key(winuser::VK_SPACE)
+							}
+						},
 						'D' => key(winuser::VK_SHIFT),
 						'F' => {
 							self.ctrlmod_on = key_pressed;
@@ -350,7 +381,18 @@ impl InputHookState
 						PLUS => key(winuser::VK_F12),
 						'N' => down_only(ctrl_key('Z')),
 						'M' => down_only(ctrl_key('Y')),
-						'C' => down_only(ctrl_key('C')),
+						'C' => {
+							if self.admin_on {
+								if key_pressed {
+									self.colemak_on = !self.colemak_on;
+									toast_notification(if self.colemak_on { "Colemak" } else { "Qwerty" });
+								}
+
+								RemapTarget::Block
+							} else {
+								down_only(ctrl_key('C'))
+							}
+						},
 						'X' => down_only(ctrl_key('X')),
 						'V' => down_only(ctrl_key('V')),
 						'S' => down_only(ctrl_key('S')),
@@ -389,12 +431,9 @@ impl InputHookState
 					}
 
 					mapped_key
-				} else {
-					remap
-				};
+				} else if self.mod2_on {
+					// Pipe/backslash layer
 
-				// Pipe/backslash layer
-				let remap = if self.mod2_on {
 					match input_key.vkCode as u8 as char
 					{
 						' ' => key(winuser::VK_SPACE),
@@ -407,7 +446,7 @@ impl InputHookState
 						'I' => down_only(key(winuser::VK_OEM_4)),
 						'O' => down_only(key(winuser::VK_OEM_6)),
 						// l; {}
-						'L' => down_only(shift_key(winuser::VK_OEM_4)),
+ 						'L' => down_only(shift_key(winuser::VK_OEM_4)),
 						SEMICOLON => down_only(shift_key(winuser::VK_OEM_6)),
 						// yu -+
 						'Y' => down_only(key(MINUS)),
@@ -648,6 +687,60 @@ pub unsafe extern "system" fn win_proc(
 }
 
 fn main() {
+	let rt = RuntimeContext::init();
+	run();
+	rt.uninit();
+}
+
+thread_local! {
+	static TOAST_NOTIFIER : RefCell<winrt::ComPtr<ToastNotifier>> =
+		RefCell::new(ToastNotificationManager::create_toast_notifier_with_id(
+			// Use PowerShell's App ID to circumvent the need to register one.
+			&FastHString::new("{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\WindowsPowerShell\\v1.0\\powershell.exe")
+		).unwrap());
+
+	static PREVIOUS_TOAST: RefCell<Option<ComPtr<ToastNotification>>> = RefCell::new(None);
+}
+
+fn toast_notification(content: &str)
+{
+	TOAST_NOTIFIER.with(|toast_notifier| {
+		let toast_notifier = &*toast_notifier.borrow();
+
+		PREVIOUS_TOAST.with(|prev_toast| {
+			let prev_toast = &mut *prev_toast.borrow_mut();
+
+			// If there's any previous toast, hide it right away.
+			if let &mut Some(ref toast) = prev_toast {
+				unsafe { toast_notifier.hide(toast).ok(); }
+				*prev_toast = None;
+			}
+
+			unsafe {
+			    // Get a toast XML template
+			    let toast_xml = ToastNotificationManager::get_template_content(ToastTemplateType::ToastText02).unwrap();
+
+			    // Fill in the text elements
+			    let toast_text_elements = toast_xml.get_elements_by_tag_name(&FastHString::new("text")).unwrap();
+			    
+			    toast_text_elements.item(0).unwrap().append_child(&*toast_xml.create_text_node(&FastHString::new("h3keys")).unwrap().query_interface::<IXmlNode>().unwrap()).unwrap();
+			    toast_text_elements.item(1).unwrap().append_child(&*toast_xml.create_text_node(&FastHString::new(content)).unwrap().query_interface::<IXmlNode>().unwrap()).unwrap();
+
+			    // Create the toast and attach event listeners
+			    let toast = ToastNotification::create_toast_notification(&*toast_xml).unwrap();
+
+			    // Show the toast
+				(*toast_notifier).show(&*toast).unwrap();
+
+				// Save it for next time, so we can hide it quickly
+				*prev_toast = Some(toast);
+			}
+		});
+	});
+}
+
+fn run()
+{
 	unsafe {
 		HOOK_STATE = Some(InputHookState::new());
 		kernel32::SetThreadPriority(kernel32::GetCurrentThread(), 1 /* THREAD_PRIORITY_ABOVE_NORMAL */);
