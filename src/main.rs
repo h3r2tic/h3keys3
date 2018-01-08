@@ -1,6 +1,7 @@
 #![windows_subsystem = "windows"]
 #![feature(nll)]
 extern crate winapi;
+extern crate user32;
 extern crate kernel32;
 extern crate winrt;
 use winapi::shared::minwindef::*;
@@ -229,6 +230,27 @@ impl InputHookState
 		}
 	}
 
+	fn send_key(key: u8, down: bool) {
+		unsafe {
+			let mut input = winuser::INPUT {
+				type_: winuser::INPUT_KEYBOARD,
+				u: mem::uninitialized()
+			};
+
+			*input.u.ki_mut() = winuser::KEYBDINPUT {
+				wVk: key as u16,
+				wScan: winuser::MapVirtualKeyA(key as u32, winuser::MAPVK_VK_TO_VSC) as u16,
+				dwFlags: if down {0} else {winuser::KEYEVENTF_KEYUP},
+				time: 0,
+				dwExtraInfo: H3KEYS_MAGIC,
+			};
+
+	        winuser::SendInput(1, &mut input, mem::size_of::<winuser::INPUT>() as i32);
+		}
+
+		//unsafe { winuser::keybd_event(key, 0, if down {0} else {winuser::KEYEVENTF_KEYUP}, H3KEYS_MAGIC); }
+	}
+
 	fn key_hook(&mut self, code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
 		if winuser::HC_ACTION == code
 		{
@@ -244,6 +266,10 @@ impl InputHookState
 				if key_pressed { rt } else { key(0) }
 			};
 
+			if key_pressed {
+				//println!("key: 0x{:x}", input_key.vkCode);
+			}
+
 			if key_pressed || key_released
 			{
 				// Enable caps-lock layer
@@ -251,7 +277,7 @@ impl InputHookState
 					// If disabling, make sure all remapped keys get released
 					if key_released {
 						for &key in self.mod1_keys_down.iter() {
-							unsafe { winuser::keybd_event(key as u8, 0, winuser::KEYEVENTF_KEYUP, H3KEYS_MAGIC); }
+							Self::send_key(key as u8, false);
 						}
 						self.mod1_keys_down.clear();
 						self.ctrlmod_on = false;
@@ -419,6 +445,7 @@ impl InputHookState
 							self.winkey_on = key_pressed;
 							key(winuser::VK_LWIN)
 						},
+						LEFTALT => key(0),	// pass-through
 						_ => RemapTarget::Block,
 					};
 
@@ -463,7 +490,15 @@ impl InputHookState
 								key_up('8'),
 								key_up(winuser::VK_SHIFT),
 							])),
-						//FWD_SLASH => down_only(),
+						FWD_SLASH => down_only(
+							RemapTarget::KeySeq(vec![
+								key_down(winuser::VK_SHIFT),
+								key_down('8'),
+								key_up('8'),
+								key_up(winuser::VK_SHIFT),
+								key_down(winuser::VK_OEM_2),
+								key_up(winuser::VK_OEM_2),
+							])),
 						_ => RemapTarget::Block,
 					}
 				} else {
@@ -473,13 +508,13 @@ impl InputHookState
 				if remap != key(0) {
 					match remap {
 						RemapTarget::BlindKey(key) => {
-							unsafe { winuser::keybd_event(key as u8, 0, if key_released {winuser::KEYEVENTF_KEYUP} else {0}, H3KEYS_MAGIC) }
+							Self::send_key(key as u8, key_pressed);
 						},
 						RemapTarget::KeySeq(kseq) => {
 							for key_action in kseq.iter() {
 								match key_action {
-									&KeyAction::Down(key) => unsafe { winuser::keybd_event(key as u8, 0, 0, H3KEYS_MAGIC) },
-									&KeyAction::Up(key) => unsafe { winuser::keybd_event(key as u8, 0, winuser::KEYEVENTF_KEYUP, H3KEYS_MAGIC) },
+									&KeyAction::Down(key) => Self::send_key(key as u8, true),
+									&KeyAction::Up(key) => Self::send_key(key as u8, false),
 								}
 							}
 						},
