@@ -26,7 +26,9 @@ const UK_TILDE : char = winuser::VK_OEM_5 as u8 as char;
 const ALT_GR : char = winuser::VK_RMENU as u8 as char;
 const RIGHTCTRL : char = winuser::VK_RCONTROL as u8 as char;
 const LEFTCTRL : char = winuser::VK_LCONTROL as u8 as char;
+const CTRL : char = winuser::VK_CONTROL as u8 as char;
 const LEFTALT : char = winuser::VK_LMENU as u8 as char;
+const ALT : char = winuser::VK_MENU as u8 as char;
 const BACKSPACE : char = winuser::VK_BACK as u8 as char;
 const COMMA : char = winuser::VK_OEM_COMMA as u8 as char;
 const PERIOD : char = winuser::VK_OEM_PERIOD as u8 as char;
@@ -446,6 +448,8 @@ impl InputHookState
 							key(winuser::VK_LWIN)
 						},
 						LEFTALT => key(0),	// pass-through
+						ALT => key(0),	// pass-through
+						CTRL => key(0),	// pass-through
 						_ => RemapTarget::Block,
 					};
 
