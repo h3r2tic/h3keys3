@@ -35,9 +35,15 @@ use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 use std::cell::RefCell;
 
+#[derive(Debug, Copy, Clone)]
+pub enum KeyEvent {
+	Down,
+	Repeat,
+	Up,
+}
 
 pub trait KeyboardDevice {
-	fn send_key(&mut self, key: u8, down: bool);
+	fn send_key(&mut self, key: u8, event: KeyEvent);
 }
 
 #[derive(PartialEq, Debug)]
@@ -185,19 +191,26 @@ impl InputHookState
 		}
 	}*/
 
-	fn key_hook(&mut self, device: &mut KeyboardDevice, key_pressed: bool, key_released: bool, vk: u32) -> u32 {
-		println!("key_hook {} {} {}", key_pressed, key_released, vk);
+	fn key_hook(&mut self, device: &mut KeyboardDevice, key_event: KeyEvent, vk: u32) -> u32 {
+		println!("key_hook {:?} {}", key_event, vk);
+
+		let key_pressed_now = if let KeyEvent::Down = key_event { true } else { false };
+		let key_pressed_or_held = if let KeyEvent::Up = key_event { false } else { true };
 
 		let down_only = |rt: RemapTarget| {
-			if key_pressed { rt } else { key(0) }
+			if let KeyEvent::Down = key_event { rt } else { key(0) }
+		};
+
+		let down_or_held_only = |rt: RemapTarget| {
+			if let KeyEvent::Up = key_event { key(0) } else { rt }
 		};
 
 		// Enable caps-lock layer
 		if CAPS_LOCK == vk as u8 as char {
 			// If disabling, make sure all remapped keys get released
-			if key_released {
+			if let KeyEvent::Up = key_event {
 				for &key in self.mod1_keys_down.iter() {
-					device.send_key(key as u8, false);
+					device.send_key(key as u8, KeyEvent::Up);
 				}
 				self.mod1_keys_down.clear();
 				self.ctrlmod_on = false;
@@ -205,13 +218,13 @@ impl InputHookState
 				self.admin_on = false;
 			}
 
-			self.mod1_on = key_pressed;
+			self.mod1_on = key_pressed_or_held;
 			return 1;
 		}
 
 		// Enable pipe/backslash layer
 		if OEM_102 == vk as u8 as char {
-			self.mod2_on = key_pressed;
+			self.mod2_on = key_pressed_or_held;
 			return 1;
 		}
 
@@ -229,26 +242,26 @@ impl InputHookState
 			TILDE => key(ESCAPE),
 			UK_TILDE => key(TILDE),
 			ALT_GR => {
-				self.winkey_on = key_pressed;
+				self.winkey_on = key_pressed_or_held;
 				key(LWIN)
 			},
 			LEFTALT => {
-				self.leftalt_on = key_pressed;
+				self.leftalt_on = key_pressed_or_held;
 				remap
 			}
 			LEFTCTRL => {
-				self.leftctrl_on = key_pressed;
+				self.leftctrl_on = key_pressed_or_held;
 				remap
 			}
 			BACKSPACE => {
-				if key_pressed && self.leftalt_on && self.leftctrl_on {
+				if key_pressed_now && self.leftalt_on && self.leftctrl_on {
 					kill_top_window_process();
 				}
 				remap
 			}
 			RIGHTCTRL => key(APPS),
 			K_U =>
-				if self.winkey_on && key_pressed {
+				if self.winkey_on && key_pressed_now {
 					// We will not register a key-up due to the lock screen
 					self.winkey_on = false;
 					lock_workstation();
@@ -257,13 +270,13 @@ impl InputHookState
 					remap
 				},
 			K_4 =>
-				if self.winkey_on && key_pressed {
+				if self.winkey_on && key_pressed_or_held {
 					down_only(alt_key(F4))
 				} else {
 					remap
 				},
 			K_M =>
-				if self.winkey_on && key_pressed {
+				if self.winkey_on && key_pressed_or_held {
 					key(K_D)
 				} else {
 					remap
@@ -277,12 +290,12 @@ impl InputHookState
 			let mapped_key = match vk as u8 as char
 			{
 				ESCAPE => {
-					self.admin_on = key_pressed;
+					self.admin_on = key_pressed_or_held;
 					RemapTarget::Block
 				},
 				SPACE => {
 					if self.admin_on {
-						if key_released {
+						if let KeyEvent::Up = key_event {
 							toast_notification("Program terminated");
 							std::process::exit(0);
 						} else {
@@ -294,7 +307,7 @@ impl InputHookState
 				},
 				K_D => key(SHIFT),
 				K_F => {
-					self.ctrlmod_on = key_pressed;
+					self.ctrlmod_on = key_pressed_or_held;
 					key(CTRL)
 				},
 				K_J => key(LEFT),
@@ -314,11 +327,11 @@ impl InputHookState
 				K_0 => key(F10),
 				MINUS => key(F11),
 				PLUS => key(F12),
-				K_N => down_only(ctrl_key(K_Z)),
-				K_M => down_only(ctrl_key(K_Y)),
+				K_N => down_or_held_only(ctrl_key(K_Z)),
+				K_M => down_or_held_only(ctrl_key(K_Y)),
 				K_C => {
 					if self.admin_on {
-						if key_pressed {
+						if key_pressed_now {
 							self.colemak_on = !self.colemak_on;
 							toast_notification(if self.colemak_on { "Colemak" } else { "Qwerty" });
 						}
@@ -335,26 +348,25 @@ impl InputHookState
 				K_P => key(DELETE),
 				COMMA => down_only(shift_key(K_7)),
 
-				// TODO
-				//PERIOD => down_only(shift_key(OEM_5)),
-				//FWD_SLASH => down_only(key(OEM_5)),
+				PERIOD => down_or_held_only(shift_key(BACKSLASH)),
+				FWD_SLASH => key(BACKSLASH),
 
 				// caps-i is up
 				// caps-ctrl-i is page up
 				K_I => if self.ctrlmod_on {
-					down_only(no_ctrl_key(PGUP))
+					down_or_held_only(no_ctrl_key(PGUP))
 				} else {
 					key(UP)
 				},
 				// caps-key is down
 				// caps-ctrl-key is page down
 				K_K => if self.ctrlmod_on {
-					down_only(no_ctrl_key(PGDOWN))
+					down_or_held_only(no_ctrl_key(PGDOWN))
 				} else {
 					key(DOWN)
 				},
 				ALT_GR => {
-					self.winkey_on = key_pressed;
+					self.winkey_on = key_pressed_or_held;
 					key(LWIN)
 				},
 				LEFTALT => key(0),	// pass-through
@@ -364,7 +376,7 @@ impl InputHookState
 			};
 
 			if let RemapTarget::BlindKey(k) = mapped_key {
-				if key_pressed {
+				if key_pressed_or_held {
 					self.mod1_keys_down.insert(k);
 				} else {
 					self.mod1_keys_down.remove(&k);
@@ -379,19 +391,19 @@ impl InputHookState
 			{
 				' ' => key(SPACE),
 				// h _
-				K_H => down_only(shift_key(MINUS)),
+				K_H => down_or_held_only(shift_key(MINUS)),
 				// jk ()
-				K_J => down_only(shift_key(K_9)),
-				K_K => down_only(shift_key(K_0)),
+				K_J => down_or_held_only(shift_key(K_9)),
+				K_K => down_or_held_only(shift_key(K_0)),
 				// io []
 				K_I => key(LSQUARE),
 				K_O => key(RSQUARE),
 				// l; {}
-					K_L => down_only(shift_key(LSQUARE)),
-				SEMICOLON => down_only(shift_key(RSQUARE)),
+				K_L => down_or_held_only(shift_key(LSQUARE)),
+				SEMICOLON => down_or_held_only(shift_key(RSQUARE)),
 				// yu -+
 				K_Y => key(MINUS),
-				K_U => down_only(shift_key(PLUS)),
+				K_U => down_or_held_only(shift_key(PLUS)),
 				// m =
 				K_M => key(PLUS),
 				// . /*
@@ -424,13 +436,13 @@ impl InputHookState
 		if remap != key(0) {
 			match remap {
 				RemapTarget::BlindKey(key) => {
-					device.send_key(key as u8, key_pressed);
+					device.send_key(key as u8, key_event);
 				},
 				RemapTarget::KeySeq(kseq) => {
 					for key_action in kseq.iter() {
 						match key_action {
-							&KeyAction::Down(key) => device.send_key(key as u8, true),
-							&KeyAction::Up(key) => device.send_key(key as u8, false),
+							&KeyAction::Down(key) => device.send_key(key as u8, KeyEvent::Down),
+							&KeyAction::Up(key) => device.send_key(key as u8, KeyEvent::Up),
 						}
 					}
 				},
@@ -566,13 +578,13 @@ fn main() {
 
 #[cfg(target_os = "linux")]
 fn main() {
+	let mut idev = grab_keyboard_device();
     let mut odev = linux::UinputKeyboard::new(
     	uinput::default().unwrap()
 		.name("test").unwrap()
 		.event(uinput::event::Keyboard::All).unwrap()
 		.create().unwrap()
 	);
-    let mut idev = grab_keyboard_device();
     let mut state = InputHookState::default();
     state.colemak_on = true;
 
@@ -581,9 +593,15 @@ fn main() {
     loop {
         for ev in idev.events_no_sync().unwrap() {
             if ev._type == 1 {
+				let key_event = match ev.value {
+					1 => KeyEvent::Down,
+					2 => KeyEvent::Repeat,
+					_ => KeyEvent::Up,
+				};
+
 	            println!("{:?}", ev);
-            	if 0 == state.key_hook(&mut odev, ev.value == 1, ev.value == 0, ev.code as u32) {
-            		odev.send_key(ev.code as u8, ev.value != 0);
+            	if 0 == state.key_hook(&mut odev, key_event, ev.code as u32) {
+            		odev.send_key(ev.code as u8, key_event);
             	}
             }
         }

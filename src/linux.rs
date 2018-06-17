@@ -5,11 +5,12 @@ use evdev;
 use std;
 use std::io::prelude::*;
 use KeyboardDevice;
+use KeyEvent;
 
 pub const ESCAPE : char = KEY_ESC as u8 as char;
 pub const SEMICOLON : char = KEY_SEMICOLON as u8 as char;
-pub const TILDE : char = KEY_APOSTROPHE as u8 as char;
-pub const UK_TILDE : char = KEY_GRAVE as u8 as char;
+pub const TILDE : char = KEY_GRAVE as u8 as char;
+pub const UK_TILDE : char = KEY_BACKSLASH as u8 as char;
 pub const ALT_GR : char = KEY_RIGHTALT as u8 as char;
 pub const RIGHTCTRL : char = KEY_RIGHTCTRL as u8 as char;
 pub const LEFTCTRL : char = KEY_LEFTCTRL as u8 as char;
@@ -32,7 +33,7 @@ pub const SHIFT : char = KEY_LEFTSHIFT as u8 as char;
 pub const CAPS_LOCK : char = KEY_CAPSLOCK as u8 as char;
 pub const LWIN : char = KEY_LEFTMETA as u8 as char;
 pub const OEM_102 : char = KEY_102ND as u8 as char;
-//pub const OEM_5 : char = KEY_OEM_5 as u8 as char;
+pub const BACKSLASH : char = KEY_BACKSLASH as u8 as char;
 pub const LSQUARE : char = KEY_LEFTBRACE as u8 as char;
 pub const RSQUARE : char = KEY_RIGHTBRACE as u8 as char;
 pub const APPS : char = KEY_COMPOSE as u8 as char;
@@ -121,9 +122,14 @@ impl UinputKeyboard {
 }
 
 impl KeyboardDevice for UinputKeyboard {
-	fn send_key(&mut self, key: u8, down: bool) {
-		println!("send_key({}, {})", key, down);
-		self.device.write(EV_KEY, key as i32, if down {1} else {0}).unwrap();
+	fn send_key(&mut self, key: u8, key_event: KeyEvent) {
+		println!("send_key({}, {:?})", key, key_event);
+        let value = match key_event {
+            KeyEvent::Down => 1,
+            KeyEvent::Repeat => 2,
+            KeyEvent::Up => 0
+        };
+		self.device.write(EV_KEY, key as i32, value).unwrap();
 		self.device.synchronize().unwrap();
 	}
 }
