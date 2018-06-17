@@ -605,5 +605,7 @@ fn main() {
             	}
             }
         }
+
+		thread::sleep(time::Duration::from_millis(3));
     }
 }
