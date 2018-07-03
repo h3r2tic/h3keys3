@@ -141,12 +141,25 @@ pub fn toast_notification(_content: &str) {}
 pub fn grab_keyboard_device() -> evdev::Device {
     let mut args = std::env::args_os();
     let d;
+
+    let mut devices = evdev::enumerate();
     if args.len() > 1 {
-        d = evdev::Device::open(&args.nth(1).unwrap()).unwrap();
-    } else {
-        let mut devices = evdev::enumerate();
+        let wanted_path = &args.nth(1).unwrap();
+
+        let mut found_id = None;
         for (i, d) in devices.iter().enumerate() {
-            println!("{}: {:?}", i, d.name());
+            if let Some(p) = d.physical_path() {
+                if p.to_str().unwrap() == wanted_path.to_str().unwrap() {
+                    found_id = Some(i);
+                    break;
+                }
+            }
+        }
+
+        d = devices.swap_remove(found_id.expect("Cound not find device"));
+    } else {
+        for (i, d) in devices.iter().enumerate() {
+            println!("{}: {:?} path:{:?}", i, d.name(), d.physical_path());
         }
         print!("Select the device [0-{}]: ", devices.len());
         let _ = std::io::stdout().flush();
