@@ -143,6 +143,19 @@ fn remap_colemak(vk: u8) -> i32
 	res as u8 as i32
 }
 
+#[cfg(target_os = "windows")]
+fn remap_minimize() -> RemapTarget {
+	RemapTarget::KeySeq(vec![
+		key_down(K_D),
+		key_up(K_D),
+	])
+}
+
+#[cfg(target_os = "linux")]
+fn remap_minimize() -> RemapTarget {
+	RemapTarget::Block
+}
+
 #[derive(Default)]
 struct InputHookState
 {
@@ -160,6 +173,7 @@ struct InputHookState
 	os_state: OsState,
 
 	mod1_keys_down : HashSet<i32>,
+	mod2_keys_down : HashSet<i32>,
 }
 
 impl InputHookState
@@ -224,6 +238,13 @@ impl InputHookState
 
 		// Enable pipe/backslash layer
 		if OEM_102 == vk as u8 as char {
+			if let KeyEvent::Up = key_event {
+				for &key in self.mod2_keys_down.iter() {
+					device.send_key(key as u8, KeyEvent::Up);
+				}
+				self.mod2_keys_down.clear();
+			}
+
 			self.mod2_on = key_pressed_or_held;
 			return 1;
 		}
@@ -270,14 +291,14 @@ impl InputHookState
 					remap
 				},
 			K_4 =>
-				if self.winkey_on && key_pressed_or_held {
-					down_only(alt_key(F4))
+				if self.winkey_on && key_pressed_now {
+					alt_key(F4)
 				} else {
 					remap
 				},
 			K_M =>
-				if self.winkey_on && key_pressed_or_held {
-					key(K_D)
+				if self.winkey_on && key_pressed_now {
+					remap_minimize()
 				} else {
 					remap
 				},
@@ -387,7 +408,7 @@ impl InputHookState
 		} else if self.mod2_on {
 			// Pipe/backslash layer
 
-			match vk as u8 as char
+			let mapped_key = match vk as u8 as char
 			{
 				' ' => key(SPACE),
 				// h _
@@ -426,7 +447,17 @@ impl InputHookState
 						key_up(FWD_SLASH),
 					])),
 				_ => RemapTarget::Block,
+			};
+
+			if let RemapTarget::BlindKey(k) = mapped_key {
+				if key_pressed_or_held {
+					self.mod2_keys_down.insert(k);
+				} else {
+					self.mod2_keys_down.remove(&k);
+				}
 			}
+
+			mapped_key
 		} else {
 			remap
 		};
