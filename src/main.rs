@@ -1,5 +1,4 @@
 #![windows_subsystem = "windows"]
-#![feature(nll)]
 
 #[cfg(target_os = "windows")]
 extern crate winapi;
