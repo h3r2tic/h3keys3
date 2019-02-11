@@ -205,7 +205,7 @@ impl InputHookState
 	}*/
 
 	fn key_hook(&mut self, device: &mut KeyboardDevice, key_event: KeyEvent, vk: u32) -> u32 {
-		println!("key_hook {:?} {}", key_event, vk);
+		//println!("key_hook {:?} {}", key_event, vk);
 
 		let key_pressed_now = if let KeyEvent::Down = key_event { true } else { false };
 		let key_pressed_or_held = if let KeyEvent::Up = key_event { false } else { true };
@@ -250,10 +250,10 @@ impl InputHookState
 
 		// Colemak
 		let remap = if self.colemak_on {
-			println!("Remap colemak");
+			//println!("Remap colemak");
 			key(remap_colemak(vk as u8))
 		} else {
-			println!("NO Remap colemak");
+			//println!("NO Remap colemak");
 			key(0)
 		};
 
@@ -461,7 +461,7 @@ impl InputHookState
 			remap
 		};
 
-		println!("reamap: {:?}", remap);
+		//println!("reamap: {:?}", remap);
 
 		if remap != key(0) {
 			match remap {
@@ -618,8 +618,8 @@ fn main() {
     let mut state = InputHookState::default();
     state.colemak_on = true;
 
-    println!("{}", idev);
-    println!("Events:");
+    //println!("{}", idev);
+    //println!("Events:");
     loop {
         for ev in idev.events_no_sync().unwrap() {
             if ev._type == 1 {
@@ -629,7 +629,7 @@ fn main() {
 					_ => KeyEvent::Up,
 				};
 
-	            println!("{:?}", ev);
+	            //println!("{:?}", ev);
             	if 0 == state.key_hook(&mut odev, key_event, ev.code as u32) {
             		odev.send_key(ev.code as u8, key_event);
             	}

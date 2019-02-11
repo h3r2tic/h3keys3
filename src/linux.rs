@@ -123,7 +123,7 @@ impl UinputKeyboard {
 
 impl KeyboardDevice for UinputKeyboard {
 	fn send_key(&mut self, key: u8, key_event: KeyEvent) {
-		println!("send_key({}, {:?})", key, key_event);
+		//println!("send_key({}, {:?})", key, key_event);
         let value = match key_event {
             KeyEvent::Down => 1,
             KeyEvent::Repeat => 2,
