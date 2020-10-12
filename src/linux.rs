@@ -166,7 +166,7 @@ pub fn grab_keyboard_device() -> evdev::Device {
         d = devices.swap_remove(chosen.trim().parse::<usize>().unwrap());
     }
 
-    unsafe { evdev::raw::eviocgrab(d.fd(), &1) }.unwrap();
+    unsafe { evdev::raw::eviocgrab(d.fd(), 1) }.unwrap();
 
     d
 }
