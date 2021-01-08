@@ -1,5 +1,4 @@
 #![windows_subsystem = "windows"]
-#![feature(nll)]
 extern crate kernel32;
 extern crate user32;
 extern crate winapi;
@@ -705,7 +704,7 @@ impl ScrollEmuState {
         0
     }
 
-    fn emulate_scroll(&mut self) -> Box<Fn()> {
+    fn emulate_scroll(&mut self) -> Box<dyn Fn()> {
         if self.scroll_emu_on {
             let decay = 0.92f32;
             self.scroll_emu_acc = (self.scroll_emu_acc.0 * decay, self.scroll_emu_acc.1 * decay);
@@ -801,10 +800,16 @@ fn toast_notification(content: &str) {
             let prev_toast = &mut *prev_toast.borrow_mut();
 
             // If there's any previous toast, hide it right away.
-            if let &mut Some(ref toast) = prev_toast {
+            let should_hide_previous = if let &mut Some(ref toast) = prev_toast {
                 unsafe {
                     toast_notifier.hide(toast).ok();
                 }
+                true
+            } else {
+                false
+            };
+
+            if should_hide_previous {
                 *prev_toast = None;
             }
 
