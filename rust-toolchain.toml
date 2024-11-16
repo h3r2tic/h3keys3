@@ -1,0 +1,6 @@
+[toolchain]
+channel = "1.73"
+#channel = "nightly"
+
+# Note: not requiring in the toolchain config so that containerized builds don't install it.
+#components = [ "rustfmt" ]
